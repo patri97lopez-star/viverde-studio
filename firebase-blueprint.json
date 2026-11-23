@@ -1,0 +1,178 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Multi-tenant nursery, florist, or landscaping studio account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "logoUrl": { "type": "string", "maxLength": 2000 },
+        "address": { "type": "string", "maxLength": 250 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 120 },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "vatRate": { "type": "number" },
+        "defaultMarginPercent": { "type": "number" },
+        "transportFlatFee": { "type": "number" },
+        "laborRatePerHour": { "type": "number" },
+        "commercialTerms": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "ownerUid", "vatRate", "createdAt", "updatedAt"]
+    },
+    "CompanyMember": {
+      "title": "CompanyMember",
+      "description": "RBAC membership mapping a user UID to a company with a specific role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["super_admin", "company_admin", "employee", "client"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "companyId", "name", "role", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile stored privately for the authenticated owner.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 120 },
+        "activeCompanyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Botanical specimen, turf, or landscaping material scoped to a company.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "category": { "type": "string", "enum": ["arboles", "arbustos", "plantas", "flores", "cesped", "materiales"] },
+        "subcategory": { "type": "string", "maxLength": 80 },
+        "commercialName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "botanicalName": { "type": "string", "maxLength": 140 },
+        "description": { "type": "string", "maxLength": 1500 },
+        "price": { "type": "number" },
+        "unit": { "type": "string", "enum": ["unidad", "m2", "m3", "ml"] },
+        "availability": { "type": "string", "enum": ["disponible", "bajo_pedido", "agotado"] },
+        "imageUrl": { "type": "string", "maxLength": 2000 },
+        "model3dUrl": { "type": "string", "maxLength": 2000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "companyId", "category", "commercialName", "price", "unit", "availability", "updatedAt"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Commercial client belonging to a single company tenant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 250 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "companyId", "name", "createdAt"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Saved 2D/3D garden design project scoped to a company.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "clientId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "spaceType": { "type": "string", "maxLength": 60 },
+        "widthM": { "type": "number" },
+        "lengthM": { "type": "number" },
+        "areaM2": { "type": "number" },
+        "status": { "type": "string", "enum": ["borrador", "propuesta", "aprobado", "en_ejecucion", "completado"] },
+        "estimatedTotal": { "type": "number" },
+        "shareEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "companyId", "ownerUid", "name", "widthM", "lengthM", "areaM2", "status", "createdAt", "updatedAt"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "Generated commercial budget linked to a project and company.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "projectId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "quoteNumber": { "type": "string", "maxLength": 40 },
+        "subtotal": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["borrador", "enviado", "aceptado", "rechazado"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "companyId", "ownerUid", "projectId", "quoteNumber", "subtotal", "total", "status", "createdAt", "updatedAt"]
+    },
+    "FloralDesign": {
+      "title": "FloralDesign",
+      "description": "Bespoke floral arrangement created in the Floristry Studio.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "companyId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "compositionType": { "type": "string", "maxLength": 60 },
+        "retailPrice": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "companyId", "ownerUid", "name", "compositionType", "retailPrice", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile and active company preference."
+    },
+    "/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/Company" },
+      "description": "Company tenant root configuration."
+    },
+    "/companies/{companyId}/members/{memberId}": {
+      "schema": { "$ref": "#/entities/CompanyMember" },
+      "description": "Company RBAC members."
+    },
+    "/companies/{companyId}/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Company-scoped plant and material catalog."
+    },
+    "/companies/{companyId}/clients/{clientId}": {
+      "schema": { "$ref": "#/entities/Client" },
+      "description": "Company-scoped client records (PII restricted to company staff)."
+    },
+    "/companies/{companyId}/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/Project" },
+      "description": "Company-scoped 2D/3D garden projects."
+    },
+    "/companies/{companyId}/quotes/{quoteId}": {
+      "schema": { "$ref": "#/entities/Quote" },
+      "description": "Company-scoped commercial quotes."
+    },
+    "/companies/{companyId}/floralDesigns/{designId}": {
+      "schema": { "$ref": "#/entities/FloralDesign" },
+      "description": "Company-scoped floral arrangements."
+    }
+  }
+}

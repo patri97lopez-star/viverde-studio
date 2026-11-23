@@ -1,0 +1,431 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net — default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+    function isSuperAdmin() {
+      return isVerified() && request.auth.token.email == 'patri97lopez@gmail.com';
+    }
+    function isCompanyMember(companyId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid));
+    }
+    function memberRole(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)).data.role;
+    }
+    function isCompanyAdmin(companyId) {
+      return isCompanyMember(companyId) && memberRole(companyId) in ['super_admin', 'company_admin'];
+    }
+    function isCompanyStaff(companyId) {
+      return isCompanyMember(companyId) && memberRole(companyId) in ['super_admin', 'company_admin', 'employee'];
+    }
+    function isCompanyOwner(companyId) {
+      return isSignedIn() && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+    function hasListMembership() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        existing().ownerUid == request.auth.uid ||
+        (existing().keys().hasAny(['memberUids']) && request.auth.uid in existing().memberUids)
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'name', 'email', 'activeCompanyId', 'updatedAt'])
+        && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 120))
+        && (!data.keys().hasAny(['activeCompanyId']) || isValidId(data.activeCompanyId))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCompany(data, companyId) {
+      return data.keys().hasAll(['id', 'name', 'ownerUid', 'vatRate', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'name', 'logoUrl', 'address', 'phone', 'email', 'ownerUid',
+          'memberUids', 'vatRate', 'defaultMarginPercent', 'transportFlatFee',
+          'laborRatePerHour', 'commercialTerms', 'createdAt', 'updatedAt'
+        ])
+        && data.id == companyId
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['logoUrl']) || (data.logoUrl is string && data.logoUrl.size() <= 2000))
+        && (!data.keys().hasAny(['address']) || (data.address is string && data.address.size() <= 250))
+        && (!data.keys().hasAny(['phone']) || (data.phone is string && data.phone.size() <= 40))
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 120))
+        && (!data.keys().hasAny(['commercialTerms']) || (data.commercialTerms is string && data.commercialTerms.size() <= 2000))
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && data.vatRate is number && data.vatRate >= 0 && data.vatRate <= 50
+        && (!data.keys().hasAny(['defaultMarginPercent']) || (data.defaultMarginPercent is number && data.defaultMarginPercent >= 0 && data.defaultMarginPercent <= 500))
+        && (!data.keys().hasAny(['transportFlatFee']) || (data.transportFlatFee is number && data.transportFlatFee >= 0))
+        && (!data.keys().hasAny(['laborRatePerHour']) || (data.laborRatePerHour is number && data.laborRatePerHour >= 0))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMember(data, companyId, memberId) {
+      return data.keys().hasAll(['uid', 'companyId', 'name', 'role', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'companyId', 'ownerUid', 'name', 'email', 'role', 'createdAt'])
+        && data.uid == memberId && isValidId(data.uid)
+        && data.companyId == companyId
+        && (!data.keys().hasAny(['ownerUid']) || (data.ownerUid is string && data.ownerUid.size() <= 128))
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 120))
+        && data.role in ['super_admin', 'company_admin', 'employee', 'client']
+        && data.createdAt is timestamp;
+    }
+
+    function isValidProduct(data, companyId, productId) {
+      return data.keys().hasAll(['id', 'companyId', 'ownerUid', 'category', 'commercialName', 'price', 'unit', 'availability', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'companyId', 'ownerUid', 'memberUids', 'category', 'subcategory',
+          'commercialName', 'botanicalName', 'description', 'price', 'unit',
+          'dimensions', 'sunExposure', 'waterNeeds', 'bloomingSeason',
+          'climateHardiness', 'availability', 'landscapeUses', 'colorHex',
+          'indoorOutdoor', 'imageUrl', 'model3dUrl', 'modelPreset', 'isDemoData', 'updatedAt'
+        ])
+        && data.id == productId
+        && data.companyId == companyId
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && data.category in ['arboles', 'arbustos', 'plantas', 'flores', 'cesped', 'materiales']
+        && data.commercialName is string && data.commercialName.size() >= 1 && data.commercialName.size() <= 140
+        && (!data.keys().hasAny(['botanicalName']) || (data.botanicalName is string && data.botanicalName.size() <= 140))
+        && (!data.keys().hasAny(['description']) || (data.description is string && data.description.size() <= 1500))
+        && data.price is number && data.price >= 0
+        && data.unit in ['unidad', 'm2', 'm3', 'ml']
+        && data.availability in ['disponible', 'bajo_pedido', 'agotado']
+        && (!data.keys().hasAny(['imageUrl']) || (data.imageUrl is string && data.imageUrl.size() <= 2000))
+        && (!data.keys().hasAny(['model3dUrl']) || (data.model3dUrl is string && data.model3dUrl.size() <= 2000))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidClient(data, companyId, clientId) {
+      return data.keys().hasAll(['id', 'companyId', 'ownerUid', 'name', 'createdAt'])
+        && data.keys().hasOnly(['id', 'companyId', 'ownerUid', 'memberUids', 'name', 'phone', 'email', 'address', 'notes', 'createdAt'])
+        && data.id == clientId
+        && data.companyId == companyId
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && (!data.keys().hasAny(['phone']) || (data.phone is string && data.phone.size() <= 40))
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 120))
+        && (!data.keys().hasAny(['address']) || (data.address is string && data.address.size() <= 250))
+        && (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 1000))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidProject(data, companyId, projectId) {
+      return data.keys().hasAll(['id', 'companyId', 'ownerUid', 'name', 'widthM', 'lengthM', 'areaM2', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'companyId', 'ownerUid', 'memberUids', 'clientId', 'clientName',
+          'name', 'spaceType', 'terrainShape', 'widthM', 'lengthM', 'areaM2',
+          'designStyle', 'targetBudget', 'status', 'elements', 'surfaces',
+          'assumptions', 'estimatedTotal', 'previewDataUrl', 'shareEnabled',
+          'shareToken', 'createdAt', 'updatedAt'
+        ])
+        && data.id == projectId
+        && data.companyId == companyId
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && data.widthM is number && data.widthM > 0 && data.widthM <= 500
+        && data.lengthM is number && data.lengthM > 0 && data.lengthM <= 500
+        && data.areaM2 is number && data.areaM2 > 0 && data.areaM2 <= 250000
+        && data.status in ['borrador', 'propuesta', 'aprobado', 'en_ejecucion', 'completado']
+        && (!data.keys().hasAny(['elements']) || (data.elements is list && data.elements.size() <= 300))
+        && (!data.keys().hasAny(['surfaces']) || (data.surfaces is list && data.surfaces.size() <= 100))
+        && (!data.keys().hasAny(['previewDataUrl']) || (data.previewDataUrl is string && data.previewDataUrl.size() <= 350000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidQuote(data, companyId, quoteId) {
+      return data.keys().hasAll(['id', 'companyId', 'ownerUid', 'projectId', 'quoteNumber', 'subtotal', 'total', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'companyId', 'ownerUid', 'memberUids', 'projectId', 'projectName',
+          'clientId', 'clientName', 'clientEmail', 'clientPhone', 'clientAddress',
+          'quoteNumber', 'items', 'surfacesSummary', 'subtotal', 'discountPercent',
+          'discountAmount', 'transportCost', 'laborCost', 'installationCost',
+          'vatRate', 'vatAmount', 'total', 'validUntil', 'notes', 'status',
+          'previewDataUrl', 'createdAt', 'updatedAt'
+        ])
+        && data.id == quoteId
+        && data.companyId == companyId
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && isValidId(data.projectId)
+        && data.quoteNumber is string && data.quoteNumber.size() >= 1 && data.quoteNumber.size() <= 40
+        && (!data.keys().hasAny(['items']) || (data.items is list && data.items.size() <= 300))
+        && data.subtotal is number && data.subtotal >= 0
+        && data.total is number && data.total >= 0
+        && data.status in ['borrador', 'enviado', 'aceptado', 'rechazado']
+        && (!data.keys().hasAny(['notes']) || (data.notes is string && data.notes.size() <= 2000))
+        && (!data.keys().hasAny(['previewDataUrl']) || (data.previewDataUrl is string && data.previewDataUrl.size() <= 350000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFloralDesign(data, companyId, designId) {
+      return data.keys().hasAll(['id', 'companyId', 'ownerUid', 'name', 'compositionType', 'retailPrice', 'createdAt'])
+        && data.keys().hasOnly([
+          'id', 'companyId', 'ownerUid', 'memberUids', 'name', 'compositionType',
+          'wrapperStyle', 'vaseStyle', 'marginPercent', 'items', 'totalCost',
+          'retailPrice', 'createdAt', 'updatedAt'
+        ])
+        && data.id == designId
+        && data.companyId == companyId
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && (!data.keys().hasAny(['memberUids']) || (data.memberUids is list && data.memberUids.size() <= 25 && (data.memberUids.size() == 0 || data.memberUids[0] is string)))
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 140
+        && data.compositionType is string && data.compositionType.size() <= 60
+        && (!data.keys().hasAny(['items']) || (data.items is list && data.items.size() <= 100))
+        && data.retailPrice is number && data.retailPrice >= 0
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSharedProject(data, shareToken) {
+      return data.keys().hasAll(['shareToken', 'projectName', 'companyName', 'widthM', 'lengthM', 'areaM2', 'elements', 'surfaces', 'estimatedTotal', 'ownerUid', 'createdAt'])
+        && data.keys().hasOnly([
+          'shareToken', 'projectName', 'companyName', 'spaceType', 'widthM',
+          'lengthM', 'areaM2', 'elements', 'surfaces', 'estimatedTotal',
+          'previewDataUrl', 'ownerUid', 'createdAt'
+        ])
+        && data.shareToken == shareToken
+        && data.ownerUid == request.auth.uid
+        && data.projectName is string && data.projectName.size() <= 140
+        && data.companyName is string && data.companyName.size() <= 120
+        && data.elements is list && data.elements.size() <= 300
+        && data.surfaces is list && data.surfaces.size() <= 100
+        && data.createdAt is timestamp;
+    }
+
+    // 4. Test connection endpoint
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // 5. Private User Profile (PII isolated to owner)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isSignedIn() && (request.auth.uid == userId || isSuperAdmin());
+      allow list: if false;
+      allow create: if isValidId(userId) && isVerified() && request.auth.uid == userId
+        && isValidUser(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) && isVerified() && request.auth.uid == userId
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'activeCompanyId', 'updatedAt'])
+        && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // 6. Multi-Tenant Company Root & Subcollections
+    match /companies/{companyId} {
+      allow get: if isValidId(companyId) && (isCompanyMember(companyId) || isSuperAdmin());
+      allow list: if hasListMembership();
+      allow create: if isValidId(companyId) && isVerified()
+        && isValidCompany(incoming(), companyId)
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(companyId) && isVerified()
+        && isValidCompany(incoming(), companyId)
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isCompanyAdmin(companyId) || isSuperAdmin())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'logoUrl', 'address', 'phone', 'email', 'memberUids',
+          'vatRate', 'defaultMarginPercent', 'transportFlatFee',
+          'laborRatePerHour', 'commercialTerms', 'updatedAt'
+        ]);
+      allow delete: if isValidId(companyId) && isVerified() && (isCompanyOwner(companyId) || isSuperAdmin());
+
+      match /members/{memberId} {
+        allow get: if isValidId(companyId) && isValidId(memberId) && (isCompanyMember(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && isSignedIn() && (existing().uid == request.auth.uid || existing().ownerUid == request.auth.uid || isSuperAdmin());
+        allow create: if isValidId(companyId) && isValidId(memberId) && isVerified()
+          && isValidMember(incoming(), companyId, memberId)
+          && incoming().createdAt == request.time
+          && (
+            isCompanyAdmin(companyId) ||
+            isSuperAdmin() ||
+            (isCompanyOwner(companyId) && memberId == request.auth.uid && incoming().role == 'company_admin')
+          );
+        allow update: if isValidId(companyId) && isValidId(memberId) && isVerified()
+          && isValidMember(incoming(), companyId, memberId)
+          && incoming().uid == existing().uid
+          && incoming().companyId == existing().companyId
+          && incoming().createdAt == existing().createdAt
+          && (isCompanyAdmin(companyId) || isSuperAdmin())
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'email', 'role']);
+        allow delete: if isValidId(companyId) && isValidId(memberId) && isVerified() && (isCompanyAdmin(companyId) || isSuperAdmin());
+      }
+
+      match /products/{productId} {
+        allow get: if isValidId(companyId) && isValidId(productId) && (isCompanyMember(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && hasListMembership();
+        allow create: if isValidId(companyId) && isValidId(productId) && isVerified()
+          && isValidProduct(incoming(), companyId, productId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().updatedAt == request.time
+          && (isCompanyStaff(companyId) || isSuperAdmin());
+        allow update: if isValidId(companyId) && isValidId(productId) && isVerified()
+          && isValidProduct(incoming(), companyId, productId)
+          && incoming().id == existing().id
+          && incoming().companyId == existing().companyId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().updatedAt == request.time
+          && (isCompanyStaff(companyId) || isSuperAdmin())
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'category', 'subcategory', 'commercialName', 'botanicalName', 'description',
+            'price', 'unit', 'dimensions', 'sunExposure', 'waterNeeds', 'bloomingSeason',
+            'climateHardiness', 'availability', 'landscapeUses', 'colorHex',
+            'indoorOutdoor', 'imageUrl', 'model3dUrl', 'modelPreset', 'isDemoData',
+            'memberUids', 'updatedAt'
+          ]);
+        allow delete: if isValidId(companyId) && isValidId(productId) && isVerified() && (isCompanyAdmin(companyId) || isSuperAdmin());
+      }
+
+      match /clients/{clientId} {
+        allow get: if isValidId(companyId) && isValidId(clientId) && (isCompanyStaff(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && hasListMembership();
+        allow create: if isValidId(companyId) && isValidId(clientId) && isVerified()
+          && isValidClient(incoming(), companyId, clientId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && (isCompanyStaff(companyId) || isSuperAdmin());
+        allow update: if isValidId(companyId) && isValidId(clientId) && isVerified()
+          && isValidClient(incoming(), companyId, clientId)
+          && incoming().id == existing().id
+          && incoming().companyId == existing().companyId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && (isCompanyStaff(companyId) || isSuperAdmin())
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'email', 'address', 'notes', 'memberUids']);
+        allow delete: if isValidId(companyId) && isValidId(clientId) && isVerified() && (isCompanyAdmin(companyId) || isSuperAdmin());
+      }
+
+      match /projects/{projectId} {
+        allow get: if isValidId(companyId) && isValidId(projectId) && (isCompanyMember(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && hasListMembership();
+        allow create: if isValidId(companyId) && isValidId(projectId) && isVerified()
+          && isValidProject(incoming(), companyId, projectId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isCompanyMember(companyId);
+        allow update: if isValidId(companyId) && isValidId(projectId) && isVerified()
+          && isValidProject(incoming(), companyId, projectId)
+          && incoming().id == existing().id
+          && incoming().companyId == existing().companyId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (existing().status != 'completado' || isCompanyAdmin(companyId) || isSuperAdmin())
+          && (
+            (isCompanyStaff(companyId) || isSuperAdmin()) ||
+            (existing().ownerUid == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'spaceType', 'terrainShape', 'widthM', 'lengthM', 'areaM2',
+              'designStyle', 'targetBudget', 'elements', 'surfaces', 'assumptions',
+              'estimatedTotal', 'previewDataUrl', 'shareEnabled', 'shareToken', 'updatedAt'
+            ]))
+          );
+        allow delete: if isValidId(companyId) && isValidId(projectId) && isVerified()
+          && (isCompanyAdmin(companyId) || isSuperAdmin() || existing().ownerUid == request.auth.uid);
+      }
+
+      match /quotes/{quoteId} {
+        allow get: if isValidId(companyId) && isValidId(quoteId) && (isCompanyMember(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && hasListMembership();
+        allow create: if isValidId(companyId) && isValidId(quoteId) && isVerified()
+          && isValidQuote(incoming(), companyId, quoteId)
+          && incoming().ownerUid == request.auth.uid
+          && exists(/databases/$(database)/documents/companies/$(companyId)/projects/$(incoming().projectId))
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isCompanyMember(companyId);
+        allow update: if isValidId(companyId) && isValidId(quoteId) && isVerified()
+          && isValidQuote(incoming(), companyId, quoteId)
+          && incoming().id == existing().id
+          && incoming().companyId == existing().companyId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().projectId == existing().projectId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (!(existing().status in ['aceptado', 'rechazado']) || isCompanyAdmin(companyId) || isSuperAdmin())
+          && (isCompanyStaff(companyId) || isSuperAdmin() || (
+            existing().ownerUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'items', 'surfacesSummary', 'subtotal', 'discountPercent', 'discountAmount',
+              'transportCost', 'laborCost', 'installationCost', 'vatRate', 'vatAmount',
+              'total', 'validUntil', 'notes', 'previewDataUrl', 'updatedAt'
+            ])
+          ));
+        allow delete: if isValidId(companyId) && isValidId(quoteId) && isVerified() && (isCompanyAdmin(companyId) || isSuperAdmin());
+      }
+
+      match /floralDesigns/{designId} {
+        allow get: if isValidId(companyId) && isValidId(designId) && (isCompanyMember(companyId) || isSuperAdmin());
+        allow list: if isValidId(companyId) && hasListMembership();
+        allow create: if isValidId(companyId) && isValidId(designId) && isVerified()
+          && isValidFloralDesign(incoming(), companyId, designId)
+          && incoming().ownerUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && isCompanyMember(companyId);
+        allow update: if isValidId(companyId) && isValidId(designId) && isVerified()
+          && isValidFloralDesign(incoming(), companyId, designId)
+          && incoming().id == existing().id
+          && incoming().companyId == existing().companyId
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().createdAt == existing().createdAt
+          && (isCompanyStaff(companyId) || isSuperAdmin() || existing().ownerUid == request.auth.uid)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'compositionType', 'wrapperStyle', 'vaseStyle', 'marginPercent',
+            'items', 'totalCost', 'retailPrice', 'memberUids', 'updatedAt'
+          ]);
+        allow delete: if isValidId(companyId) && isValidId(designId) && isVerified()
+          && (isCompanyAdmin(companyId) || isSuperAdmin() || existing().ownerUid == request.auth.uid);
+      }
+    }
+
+    // 7. Public Read-Only Shared Project Snapshots (No PII, get only, no list)
+    match /sharedProjects/{shareToken} {
+      allow get: if isValidId(shareToken);
+      allow list: if false;
+      allow create: if isValidId(shareToken) && isVerified()
+        && isValidSharedProject(incoming(), shareToken)
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(shareToken) && isVerified()
+        && isValidSharedProject(incoming(), shareToken)
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'projectName', 'companyName', 'spaceType', 'widthM', 'lengthM',
+          'areaM2', 'elements', 'surfaces', 'estimatedTotal', 'previewDataUrl'
+        ]);
+      allow delete: if isValidId(shareToken) && isVerified() && (existing().ownerUid == request.auth.uid || isSuperAdmin());
+    }
+  }
+}

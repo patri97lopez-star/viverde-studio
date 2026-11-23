@@ -1,0 +1,6 @@
+{
+  "name": "VIVERDE STUDIO",
+  "description": "Plataforma profesional de diseño 3D de jardines, catálogo botánico, composiciones florales y presupuestos automáticos para viveros, floristerías y paisajismo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
